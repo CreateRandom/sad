@@ -37,7 +37,7 @@ end = 100
 limit = len(ids)
 i = math.ceil(limit / 100)
 
-for go in range(i):
+for go in range(20):
     print('currently getting {} - {}'.format(start, end))
     sleep(6)  # needed to prevent hitting API rate limit
     id_batch = ids[start:end]
