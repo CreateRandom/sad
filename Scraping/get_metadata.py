@@ -1,3 +1,5 @@
+import string
+
 import tweepy
 import json
 import math
@@ -37,7 +39,7 @@ end = 100
 limit = len(ids)
 i = math.ceil(limit / 100)
 
-for go in range(i):
+for go in range(332):
     print('currently getting {} - {}'.format(start, end))
     sleep(6)  # needed to prevent hitting API rate limit
     id_batch = ids[start:end]
@@ -90,10 +92,17 @@ with open(output_file_short) as master_file:
     data = json.load(master_file)
     fields = ["text", "id_str"]
     print('creating CSV version of minimized json master file')
-    f = csv.writer(open('{}.csv'.format(user), 'w'))
+    f = csv.writer(open('{}.csv'.format(user+" (1)"), 'w'))
     f.writerow(fields)
+    retweets = 0
     for x in data:
+        retweets += 1
+        print(x["is_retweet"])
         try:
-            f.writerow([x['text'], x["id_str"]])
+            text = x["text"]
+            printable = set(string.printable)
+            filter(lambda x: x in printable, text)
+            f.writerow([x["source"], text, x["id_str"]])
         except Exception as e:
             print(e)
+    print(retweets)
