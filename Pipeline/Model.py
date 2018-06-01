@@ -9,6 +9,7 @@ class Model(object):
         pass
 
     # generates a text of at most max_char chars
-    def generate_text(self,char_limit, **parameters):
+    # for twitter, current max_char is 280
+    def generate_text(self, char_limit, **parameters):
 
         pass

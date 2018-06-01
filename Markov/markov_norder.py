@@ -1,4 +1,6 @@
-import sys, random, collections, os
+import random
+import collections
+import os
 
 # Since we split on whitespace, this can never be a word
 from Pipeline.Model import Model
@@ -17,7 +19,6 @@ class Markov(Model):
         self.seen = collections.deque([NONWORD] * self.order, self.order)
 
     def generate_text(self, char_limit, **parameters):
-
         return self.generate_output(char_limit)
 
     def train(self, data_path, **parameters):
@@ -29,12 +30,12 @@ class Markov(Model):
             for word in line.split():
                 self.table[tuple(self.seen)].append(word)
                 self.seen.append(word)
-        self.table[tuple(self.seen)].append(NONWORD)  # Mark the end of the file
+        self.table[tuple(self.seen)].append(NONWORD)  # Mark end of file
 
     # table, seen = generate_table("gk_papers.txt")
 
     # Generate output
-    def generate_output(self, char_limit = 140):
+    def generate_output(self, char_limit=140):
         self.seen.extend([NONWORD] * self.order)  # clear it all
         toReturn = ''
 
