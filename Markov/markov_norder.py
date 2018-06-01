@@ -1,46 +1,55 @@
 import sys, random, collections, os
 
 # Since we split on whitespace, this can never be a word
+from Pipeline.Model import Model
+
 NONWORD = "\n"
 
-class Markov():
 
-	def __init__(self, order=2):
-		self.order = order
-		self.table = collections.defaultdict(list)
-		self.seen = collections.deque([NONWORD] * self.order, self.order)
+class Markov(Model):
 
-	# Generate table
-	def generate_table(self, filename):
-		for line in open(filename): 
-			for word in line.split():
-				self.table[tuple(self.seen)].append(word)
-				self.seen.append(word)
-		self.table[tuple(self.seen)].append(NONWORD) # Mark the end of the file
+    def __init__(self, **parameters):
+        super().__init__(**parameters)
+        # get the order parameter, default value is 2
+        self.order = parameters.get('order', 2)
 
-	#table, seen = generate_table("gk_papers.txt")
+        self.table = collections.defaultdict(list)
+        self.seen = collections.deque([NONWORD] * self.order, self.order)
 
-	# Generate output
-	def generate_output(self, max_words=100):
-		self.seen.extend([NONWORD] * self.order) # clear it all
-		for i in range(max_words):
-			word = random.choice(self.table[tuple(self.seen)])
-			if word == NONWORD:
-				exit()
-			print (word),
-			self.seen.append(word)
+    def generate_text(self, char_limit, **parameters):
 
+        return self.generate_output(char_limit)
 
-	def walk_directory(self, rootDir):
-		for dirName, subdirList, fileList in os.walk(rootDir):
-			print('Found directory: %s' % dirName)
-			for fname in fileList:
-				self.generate_table(os.path.join(dirName,fname))
-				#print('\t%s' % fname)
+    def train(self, data_path, **parameters):
+        self.walk_directory(data_path)
 
+    # Generate table
+    def generate_table(self, filename):
+        for line in open(filename):
+            for word in line.split():
+                self.table[tuple(self.seen)].append(word)
+                self.seen.append(word)
+        self.table[tuple(self.seen)].append(NONWORD)  # Mark the end of the file
 
-m = Markov(order=3)
+    # table, seen = generate_table("gk_papers.txt")
 
-#m.walk_directory('./pres-speech')
-m.walk_directory('./pres-speech/obama')
-m.generate_output(max_words=100)
+    # Generate output
+    def generate_output(self, char_limit = 140):
+        self.seen.extend([NONWORD] * self.order)  # clear it all
+        toReturn = ''
+
+        while(len(toReturn) < char_limit):
+            word = random.choice(self.table[tuple(self.seen)])
+            if word == NONWORD:
+                continue
+            toReturn = toReturn + ' ' + word
+            self.seen.append(word)
+
+        return toReturn
+
+    def walk_directory(self, rootDir):
+        for dirName, subdirList, fileList in os.walk(rootDir):
+            print('Found directory: %s' % dirName)
+            for fname in fileList:
+                self.generate_table(os.path.join(dirName, fname))
+            # print('\t%s' % fname)
