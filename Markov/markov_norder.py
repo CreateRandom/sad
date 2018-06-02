@@ -6,6 +6,9 @@ from Pipeline.Model import Model
 
 NONWORD = "\n"
 
+# TODO better tokenization
+# TODO more random text
+
 
 class Markov(Model):
 
@@ -17,21 +20,13 @@ class Markov(Model):
         self.table = collections.defaultdict(list)
         self.seen = collections.deque([NONWORD] * self.order, self.order)
 
+    # Main generate function
     def generate_text(self, char_range, **parameters):
         return self.generate_output(char_range)
 
+    # Main train function
     def train(self, file_path, **parameters):
-        return self.walk_file(file_path)
-
-    # Generate table
-    def generate_table(self, line):
-        for word in line.split():
-            print(word)
-            self.table[tuple(self.seen)].append(word)
-            self.seen.append(word)
-        self.table[tuple(self.seen)].append(NONWORD)  # Mark end of file
-
-    # table, seen = generate_table("gk_papers.txt")
+        return self.train_on_file(file_path)
 
     # Generate output
     def generate_output(self, char_range):
@@ -48,7 +43,8 @@ class Markov(Model):
 
         return toReturn
 
-    def walk_file(self, filename):
+    # Train on a certain file containing tweet text
+    def train_on_file(self, filename):
         lengths = []
         for line in open(filename):
             print(line)
@@ -57,3 +53,11 @@ class Markov(Model):
             if length > 1:
                 lengths.append(length)
         return lengths
+
+    # Generate table
+    def generate_table(self, line):
+        for word in line.split(): # TODO improve
+            print(word)
+            self.table[tuple(self.seen)].append(word)
+            self.seen.append(word)
+        self.table[tuple(self.seen)].append(NONWORD)  # Mark end of file
