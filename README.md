@@ -11,3 +11,10 @@ Subtle artificial deception (SAD):  Masquerading as the Commander-in-Chief
 - Set up online questionair  R, L
   - Including a prototype
 - Get users (>20)  K, L, R
+
+
+## Installation
+
+To run markov:
+Install spacy: `sudo pip install -U spacy`
+Download English model: `python -m spacy download en`
