@@ -11,4 +11,4 @@ def load_data(fname):
 
 
 if __name__ == "__main__":
-    load_data("clean trump.csv")
+    load_data("clean_trump.csv")
