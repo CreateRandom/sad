@@ -3,11 +3,12 @@ import language_check
 
 params = {'order': 3}
 models = [Markov]
+models = [m(**params) for m in models]
 # set them all up
 
 for model in models:
-    model.train('./data/obama')
-    print(model.generate_text(char_limit=280))
+    trumpRange = model.train('./data/clean_trump.csv')
+    print(model.generate_text(char_range=trumpRange))
 
     # TODO test generated text: amount of spelling + grammar mistakes
     # To compare results and optimize parameters
