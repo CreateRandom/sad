@@ -34,6 +34,7 @@ def clean_tweets(fname, with_quoting=False):
             tweets.loc[i] = re.sub('@[a-zA-Z0-9_]*', 'USERNAME',
                                    tweets.loc[i])
             tweets.loc[i] = re.sub('[\n\r]', '\t', tweets.loc[i])
+            tweets.loc[i] = re.sub('&amp;', '&', tweets.loc[i])
             if i % 100 == 0:
                 print(i)
                 print(tweets.loc[i])
