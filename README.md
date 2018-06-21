@@ -18,3 +18,13 @@ Subtle artificial deception (SAD):  Masquerading as the Commander-in-Chief
 To run markov:
 Install spacy: `sudo pip install -U spacy`
 Download English model: `python -m spacy download en`
+
+## Word-level LSTM
+
+### Parameters 
+* Readout layer / predictions from closest word in embedding space
+* Embeddings used / embedding depth
+* Max sequence length 
+* Learning rate
+* Batch size
+* Activation function
