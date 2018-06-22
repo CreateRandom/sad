@@ -10,14 +10,6 @@ def perplexity(y_true, y_pred):
     pp = K.pow(np.e, cross_entropy)
     return pp
 
-
-# this operation is not allowed :(
-def delete_words_from_model(model, words_to_delete):
-    for word in words_to_delete:
-        del model.wv[word]
-    return model
-
-
 def convert_glove_to_w2v(glove_file):
     word2vec_output_file = glove_file + '.w2v'
     if(not os.path.isfile(word2vec_output_file)):
@@ -26,3 +18,7 @@ def convert_glove_to_w2v(glove_file):
 
     # load the w2v file and return
     return gensim.models.KeyedVectors.load_word2vec_format(word2vec_output_file, binary=False)
+
+def downsample(x,y, n_to_draw):
+    idx = np.random.choice(np.arange(len(x)), n_to_draw, replace=False)
+    return x[idx], y[idx]
