@@ -8,6 +8,14 @@ class Model(object):
 
         pass
 
+    def save(self, path):
+
+        pass
+
+    def load(self,model_file):
+
+        pass
+
     # generates a text of at most max_char chars
     # for twitter, current max_char is 280
     def generate_text(self, char_limit, file_path, **parameters):

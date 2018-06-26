@@ -1,20 +1,26 @@
 import os
-import sys
-from itertools import chain, repeat, islice
+import pickle
+import random
 
+import numpy
+from imblearn.under_sampling import RandomUnderSampler
 from keras import Sequential, optimizers
-from keras.callbacks import LambdaCallback
+from keras.callbacks import LambdaCallback, TensorBoard
 # a sci-kit learn wrapper for Keras classifier
-from keras.wrappers.scikit_learn import KerasClassifier
+from keras.models import load_model
+from keras.wrappers.scikit_learn import KerasRegressor
 from losswise.libs import LosswiseKerasCallback
 from matplotlib import pyplot
+import matplotlib.pyplot as plot
+from numpy.random.mtrand import choice
+from scipy.stats import describe
 from sklearn.model_selection import GridSearchCV
 
 from Pipeline.Model import Model
-from keras.preprocessing.text import Tokenizer, text_to_word_sequence
+from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
-from keras.layers import Embedding, LSTM, Dense, Activation, Bidirectional, Dropout, regularizers
-from LSTM.W2VUtils import perplexity, convert_glove_to_w2v
+from keras.layers import Embedding, LSTM, Dense, Activation, regularizers
+from LSTM.Utils import perplexity, convert_glove_to_w2v, downsample, chunks, merge_two_dicts, plot_history
 import numpy as np
 import losswise
 
@@ -32,20 +38,20 @@ class Embedding_LSTM(Model):
     # our losswise API key, enables us to do online loss tracing
     losswise.set_api_key('EFW1YNI7H')
 
-    def __init__(self, **parameters):
+    def __init__(self, name = None, **parameters):
         super().__init__(**parameters)
         # frequency cutoff, if set to None --> keep all words
         self.num_words_to_keep = parameters.get('num_words_to_keep',None)
         # max length of sentence to use, first n - 1 tokens --> input, last token --> output
-        self.max_sentence_len = parameters.get('max_sentence_len',20)
+        self.max_sentence_len = parameters.get('max_sentence_len', 10)
         # percentage of inputs to use for validation
-        self.validation_percentage = parameters.get('validation_perc',0.05)
+        self.validation_percentage = parameters.get('validation_perc', 0.05)
 
         # learning rate
         self.learning_rate = parameters.get('learning_rate', 0.1)
 
         self.n_epochs = parameters.get('n_epochs', 10)
-        self.batch_size = parameters.get('batch_size', 64)
+        self.batch_size = parameters.get('batch_size', 32)
 
         # path of the pre-trained glove embeddings
         if not 'glove_embedding_path' in parameters:
@@ -56,32 +62,48 @@ class Embedding_LSTM(Model):
         # full word model
         self.word_model = convert_glove_to_w2v(self.embedding_path)
         self.embedding_size = self.word_model.vector_size
-
         self.word_to_index = None
+
+        if(name is None):
+            import time
+            self.name = time.strftime("%Y%m%d-%H%M%S")
+        else:
+            self.name = name
+
+        if not os.path.exists('../logs/' + self.name):
+            os.makedirs('../logs/' + self.name)
 
 
         # whether to include a readout layer or not
-        self.do_readout = parameters.get('do_readout',False)
+        self.do_readout = parameters.get('do_readout',True)
+
+        self.stored_params = parameters
 
     def train(self, data_path, **parameters):
 
         # train samples and validation set
         train_x, train_y, val_x, val_y = self.import_data(data_path)
-        # Generate custom embedding matrix
-        # idea: only use words that are in the training data --> save memory
-        embeddings_index = self.import_embeddings(self.embedding_path)
-        vocab_size = len(self.word_to_index) + 1
 
-        # generate the embedding matrix
-        embedding_matrix = np.zeros((vocab_size, self.embedding_size))
-        for word, i in self.word_to_index.items():
-            embedding_vector = embeddings_index.get(word)
-            if embedding_vector is not None:
-                # words not found in embedding index will be all-zeros.
-                embedding_matrix[i] = embedding_vector
+        use_only_words_in_training = True
+
+        if (use_only_words_in_training):
+            # Generate custom embedding matrix
+            # idea: only use words that are in the training data --> save memory
+            embeddings_index = self.import_embeddings(self.embedding_path)
+            vocab_size = len(self.word_to_index) + 1
+            # generate the embedding matrix
+            embedding_matrix = np.zeros((vocab_size, self.embedding_size))
+            for word, i in self.word_to_index.items():
+                embedding_vector = embeddings_index.get(word)
+                if embedding_vector is not None:
+                    # words not found in embedding index will be all-zeros.
+                    embedding_matrix[i] = embedding_vector
+        else:
+            embedding_matrix = self.word_model.wv.syn0
+            vocab_size, emdedding_size = embedding_matrix.shape
 
         # load it into a layer for mapping the data
-        embedding_layer = Embedding(len(self.word_to_index) + 1,
+        embedding_layer = Embedding(vocab_size,
                                     self.embedding_size,
                                     weights=[embedding_matrix],
                                     trainable=False)
@@ -93,35 +115,41 @@ class Embedding_LSTM(Model):
 
         print('\nTraining LSTM...')
 
-        def build_readout_model(learning_rate):
+        def build_readout_model(learning_rate,n_units=None, l2_weight=None, dropout=0.):
             model = Sequential()
             # word embeddings
             model.add(embedding_layer)
-            # LSTM
-            model.add(LSTM(units=self.embedding_size))
+            if n_units == None:
+                n_units = self.embedding_size
+            model.add(LSTM(units=n_units, dropout=dropout))
 
-            # readout layer with softmax
-            # TODO think about adding regularization
-            model.add(Dense(units=vocab_size)) #, kernel_regularizer=regularizers.l2(0.01)))
+            # softmax readout layer with regularization
+            if(l2_weight is not None):
+                model.add(Dense(units=vocab_size, kernel_regularizer=regularizers.l2(l2_weight)))
+            else:
+                model.add(Dense(units=vocab_size))
+
             model.add(Activation('softmax'))
 
             # momentum: shown to be irrelevant
-            adam = optimizers.adam(lr=learning_rate, decay=1e-6)
+            adam = optimizers.adam(lr=learning_rate)#, decay=1e-6)
             # use xent between predicted class and actual class
             model.compile(optimizer=adam, loss='sparse_categorical_crossentropy', metrics=[perplexity])
             return model
 
-        def build_dense_model(learning_rate):
+        def build_dense_model(learning_rate,n_units= None, l2_weight=None,dropout = 0):
             model = Sequential()
             # word embeddings
             model.add(embedding_layer)
             # LSTM
-            model.add(LSTM(units=self.embedding_size))
+            if n_units == None:
+                n_units = self.embedding_size
+            model.add(LSTM(units=n_units))
             # TODO think about adding dropout
             # model.add(Dropout(0.2))
 
             # use RMSPROP, better for regression?
-            sgd = optimizers.rmsprop(lr=learning_rate, decay=1e-6)
+            sgd = optimizers.rmsprop(lr=learning_rate, decay=1e-6) #, clipvalue = 1)
             # TODO see how we can add perplexity here as well
             model.compile(optimizer=sgd, loss='mean_squared_error')
             return model
@@ -129,71 +157,134 @@ class Embedding_LSTM(Model):
         # callback function for when an epoch ends
         def on_epoch_end(epoch, _):
             print('\nGenerating text after epoch: %d' % epoch)
-            texts = [
-                "the move could", 'it was stated', 'the media have'
-            ]
+            texts = random.sample(self.word_to_index.keys(),k=3)
+            # texts = [
+            #     "obama", 'it was stated', 'the media have'
+            # ]
 
             for text in texts:
                 sample = self.generate_next(text)
                 print('%s... -> %s' % (text, sample))
 
         if(self.do_readout):
-            self.model = build_readout_model(learning_rate=self.learning_rate)
+            model_fn = build_readout_model
         else:
-            self.model = build_dense_model(learning_rate=self.learning_rate)
+            model_fn = build_dense_model
+
+        # Use grid search to find good parameters for the model
+
+        # link: https://machinelearningmastery.com/grid-search-hyperparameters-deep-learning-models-python-keras/
+        best_param = {}
+        do_gridsearch = True
+        if(do_gridsearch):
+
+            # wrap the model in a scikit-learn regressor
+            sci_model = KerasRegressor(build_fn=model_fn)
+
+            # define the grid search parameters
+            learning_rate = [0.01, 0.05, 0.1]
+            n_units = [int(self.embedding_size * 0.1), int(self.embedding_size * 0.5),
+                       int(self.embedding_size * 1.0)]
+            l2_weight = [None, 0.01]
+
+            epochs = [5]
+
+            param_grid = dict(learning_rate=learning_rate, epochs=epochs, n_units = n_units, l2_weight=l2_weight)
+
+            # fix random seed for reproducibility
+            seed = 42
+            numpy.random.seed(seed)
+            random.seed(seed)
+
+            # downsample randomly for gridsearch
+            if(len(train_x) > 10000):
+                train_x_d, train_y_d = downsample(train_x,train_y,10000)
+            else:
+                train_x_d = train_x
+                train_y_d = train_y
+
+            grid = GridSearchCV(estimator=sci_model, param_grid=param_grid, n_jobs=1, verbose=100,cv=3)
+            grid_result = grid.fit(train_x_d, train_y_d)
+            # summarize results
+            best_param = grid_result.best_params_
+            print("Best: %f using %s" % (grid_result.best_score_, best_param))
+            means = grid_result.cv_results_['mean_test_score']
+            stds = grid_result.cv_results_['std_test_score']
+            params = grid_result.cv_results_['params']
+            for mean, stdev, param in zip(means, stds, params):
+                print("%f (%f) with: %r" % (mean, stdev, param))
+
+
+        batch_size = best_param['batch_size'] if 'batch_size' in best_param else self.batch_size
+        learning_rate = best_param['learning_rate'] if 'learning_rate' in best_param else self.learning_rate
+        dropout = best_param['dropout'] if 'dropout' in best_param else 0.0
+        l2_weight= best_param['l2_weight'] if 'l2_weight' in best_param else None
+        n_units = best_param['n_units'] if 'n_units' in best_param else None
+
+        # fit with best parameters on full dataset
+        self.model = model_fn(learning_rate=learning_rate,n_units= n_units,l2_weight=l2_weight,dropout=dropout)
+
+        all_params = merge_two_dicts(best_param,self.stored_params)
 
         # get the training history after fitting the model
         history = self.model.fit(train_x, train_y,
-                                 batch_size=self.batch_size,
+                                 batch_size=batch_size,
                                  epochs=self.n_epochs,
                                  validation_data=(val_x, val_y),
-                                 callbacks=[LambdaCallback(on_epoch_end=on_epoch_end), LosswiseKerasCallback()])
+                                 callbacks=[LambdaCallback(on_epoch_end=on_epoch_end),
+                                            LosswiseKerasCallback(params=all_params)])
+        #TensorBoard(log_dir='../logs/' + self.name  + '/', write_images=False,histogram_freq=1)
 
-        self.plot_history(history)
 
-        # experiments with GridSearch, didn't work, look into it again
-        # link: https://machinelearningmastery.com/grid-search-hyperparameters-deep-learning-models-python-keras/
+        plot_history(history,self.name)
 
-        # # wrap the model in a scikit-learn classifier
-        # sci_model = KerasClassifier(build_fn=build_model)
-        #
-        # # define the grid search parameters
-        # batch_size = [10, 20, 40, 60, 80, 128]
-        #
-        # param_grid = dict(batch_size=batch_size)
-        # grid = GridSearchCV(estimator=sci_model, param_grid=param_grid, n_jobs=-1)
-        # grid_result = grid.fit(train_x, train_y)
-        # # summarize results
-        # print("Best: %f using %s" % (grid_result.best_score_, grid_result.best_params_))
-        # means = grid_result.cv_results_['mean_test_score']
-        # stds = grid_result.cv_results_['std_test_score']
-        # params = grid_result.cv_results_['params']
-        # for mean, stdev, param in zip(means, stds, params):
-        #     print("%f (%f) with: %r" % (mean, stdev, param))
+        # save the history
+        with open('../logs/' + self.name  + '/hist.pkl', 'wb') as file_pi:
+            pickle.dump(history.history, file_pi)
 
-    # helper for plotting model history, also see Losswise
-    def plot_history(self, history):
-        pyplot.plot(history.history['loss'])
-        pyplot.plot(history.history['val_loss'])
-        pyplot.title('model train vs validation loss')
-        pyplot.ylabel('loss')
-        pyplot.xlabel('epoch')
-        pyplot.legend(['train', 'validation'], loc='upper right')
-        pyplot.show()
+    # saving
+    def save(self, path):
 
-    # TODO find a way to generate text without having to provide initial input
+        self.model.save(path + self.name + '.hd5')
+
+        with open(path + self.name + '.pkl', 'wb') as output:
+            pickle.dump(self.word_to_index, output, pickle.HIGHEST_PROTOCOL)
+            pickle.dump(self.index_to_word, output, pickle.HIGHEST_PROTOCOL)
+            pickle.dump(self.length_dist,output,pickle.HIGHEST_PROTOCOL)
+
+    # and loading
+    def load(self, model_file):
+        self.model = load_model(model_file, custom_objects={'perplexity':perplexity})
+        if model_file.endswith('.hd5'):
+            model_file = model_file[:-4]
+            model_file = model_file + '.pkl'
+        else:
+            raise Exception()
+
+        with open(model_file, 'rb') as input:
+            self.word_to_index = pickle.load(input)
+            self.index_to_word = pickle.load(input)
+            self.length_dist = pickle.load(input)
+
     def generate_text(self, char_limit, **parameters):
-        return self.generate_next('unk', 24)
+        seed = random.sample(self.word_to_index.keys(), k=1)
+        # sample length based on observed dist
+        length = choice(a = list(self.length_dist.keys()),p=list(self.length_dist.values()))
+
+        temp = parameters.get('temperature', 0.0)
+        return_tweet = self.generate_next(seed[0], length, temperature=temp)
+        # truncate tweet if need be
+        return (return_tweet[:char_limit] + '..') if len(return_tweet) > char_limit else return_tweet
 
     # generate next predicted word based on some input text
-    def generate_next(self, text, num_generated=10):
+    def generate_next(self, text, num_generated=10, temperature = 0.0):
         word_idxs = [self.word2idx(word) for word in text.lower().split()]
         for i in range(num_generated):
             prediction = self.model.predict(x=np.array(word_idxs))
             if(self.do_readout):
-                idx = self.sample_from_softmax_layer(prediction[-1], temperature=0.1)
+                idx = self.sample_from_softmax_layer(prediction[-1], temperature=temperature)
             else:
-                idx = self.sample_from_embedding(prediction[-1], temperature=0.1)
+                idx = self.sample_from_embedding(prediction[-1], temperature=temperature)
             word_idxs.append(idx)
         return ' '.join(self.idx2word(idx) for idx in word_idxs)
 
@@ -210,7 +301,7 @@ class Embedding_LSTM(Model):
         return np.argmax(probas)
 
     # TODO add temperature
-    def sample_from_embedding(self,pred_vector, temperature = 0.0):
+    def sample_from_embedding(self,pred_vector, temperature=0.0):
         selected = 'unknown'
         # sample five words, for each check whether in original corpus
         values = self.word_model.most_similar(positive=[pred_vector], topn=5)
@@ -228,6 +319,8 @@ class Embedding_LSTM(Model):
             count = count + 1
         return toReturn
 
+
+
     # read in data from data path
     def import_data(self, data_path):
 
@@ -240,20 +333,36 @@ class Embedding_LSTM(Model):
         tokenizer.fit_on_texts(texts)
         # builds a list of tokenizer indices, e.g. each sentence is translated to its token indices
         sequences = tokenizer.texts_to_sequences(texts)
+
+        lengths = [len(i) for i in sequences]
+        # get counts for each target
+        unique, counts = np.unique(lengths, return_counts=True)
+
+        perc = [float(x) / float(len(sequences)) for x in counts]
+        # length distribution
+        self.length_dist = dict(zip(unique, perc))
+
+#       self.describe_sequences(sequences)
+
         # the mapping from those indices to the words in the tweets
         self.word_to_index = tokenizer.word_index
         # invert
         self.index_to_word = {v: k for k, v in self.word_to_index.items()}
 
-        print('Found %s unique tokens.' % len(self.word_to_index))
+        self.max_index = len(self.word_to_index)
+
+        print('Found %s unique tokens.' % self.max_index)
 
         # experimented with chunking input, inconclusive so far
 
-        # chunked_sequences = []
-        #
-        # for sequence in sequences:
-        #     sequence_chunks = list(chunks(sequence,self.max_sentence_len))
-        #     chunked_sequences.extend(sequence_chunks)
+        chunked_sequences = []
+
+        for sequence in sequences:
+            sequence_chunks = list(chunks(sequence,self.max_sentence_len))
+            chunked_sequences.extend(sequence_chunks)
+
+        # remove sequences of length one
+        sequences = [x for x in chunked_sequences if len(x) > 1]
 
         # apply padding
         sequences = pad_sequences(sequences, maxlen=self.max_sentence_len)
@@ -274,6 +383,27 @@ class Embedding_LSTM(Model):
         print('x shape:', x.shape)
         print('y shape:', y.shape)
 
+
+        # get counts for each target
+        unique, counts = np.unique(y, return_counts=True)
+
+        most_frequent = np.argpartition(counts, -5)[-5:]
+
+        print('Most frequent target words: ' + str(list(self.index_to_word[x] for x in unique[most_frequent])))
+
+        # under-sample majority classes
+        ros = RandomUnderSampler(random_state=0)
+        x, y = ros.fit_sample(x, y)
+
+        print('x shape after resampling:', x.shape)
+        print('y shape after resampling:', y.shape)
+
+        # # plot frequencies of counts
+        # freq, p_freq = np.unique(counts, return_counts=True)
+        # p_freq = p_freq / len(freq)
+        # pyplot.plot(freq,p_freq)
+        # pyplot.show()
+        #
         # split the data into a training set and a validation set
         indices = np.arange(x.shape[0])
         np.random.shuffle(indices)
@@ -288,6 +418,13 @@ class Embedding_LSTM(Model):
         y_val = y[-nb_validation_samples:]
 
         return x_train, y_train, x_val, y_val
+
+    def describe_lengths(self, lengths):
+        print('Sequence stats:')
+        print(describe(lengths))
+        plot.title("Sequence length distribution")
+        plot.hist(lengths)
+        plot.show()
 
     # helper for reading in embeddings
     def import_embeddings(self,embedding_file):
@@ -309,8 +446,3 @@ class Embedding_LSTM(Model):
 
     def idx2word(self, idx):
         return self.index_to_word[idx]
-
-# helper method for chunkizing sequences
-def chunks(chunkable, n):
-    for i in range(0, len(chunkable), n):
-        yield chunkable[i:i+n]
