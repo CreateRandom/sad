@@ -29,9 +29,9 @@ def clean_tweets(fname, with_quoting=False):
     tweets = tweets.text
     for i in range(tweet_counter):
         try:
-            tweets.loc[i] = re.sub('(http[^ ]*)', 'HYPERLINK', tweets.loc[
+            tweets.loc[i] = re.sub('(http[^ ]*)', 'httpHYPERLINK', tweets.loc[
                 i]).encode('utf8').decode()
-            tweets.loc[i] = re.sub('@[a-zA-Z0-9_]*', 'USERNAME',
+            tweets.loc[i] = re.sub('@[a-zA-Z0-9_]*', '@USERNAME',
                                    tweets.loc[i])
             tweets.loc[i] = re.sub('[\n\r]', '\t', tweets.loc[i])
             tweets.loc[i] = re.sub('&amp;', '&', tweets.loc[i])
