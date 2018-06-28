@@ -10,24 +10,21 @@ library(dplyr)
 library(lsmeans)
 library(multcompView)
 
-setwd("/home/klaus-michael/R/workspace")
 # read in a file
-rawData <- read.csv(file='cleaned_results.csv', header=TRUE, sep=",")
-raw#rawData <- read.spss(file='CCM_raw.sav')
+rawData <- read.csv(file='/home/lisette/Radboud/CCM Language and Web Interaction/sad/results/cleaned_results.csv', header=TRUE, sep=",")
+#rawData <- read.spss(file='CCM_raw.sav')
 head(rawData)
 
-# TODO rename axes to something better
 # plot some stuff
-plot(rawData$Gender)
-hist(rawData$Age)
-hist(rawData$Duration..in.seconds.)
+plot(rawData$Gender, xlab='Gender', ylab='Amount of participants', main='Gender distribution of participants')
+hist(rawData$Age, xlab='Age', ylab='Amount of participants', main='Age distribution of participants')
+hist(rawData$Duration..in.seconds., xlab='Duration', ylab='Amount of participants', main='Survey duration distribution of participants')
 # re-order the interest variable for plotting
 rawData$v3<-factor(rawData$Interest_politics, c("Very low", "Low", "Medium", "High", "Very High"))
-plot(rawData$v3)
+plot(rawData$v3, xlab='Interest', ylab='Amount of participants', main="Distribution of participants' interest in American politics")
 
-# TODO limits from 0 to 42
 # plot the scores
-hist(rawData$SC0)
+hist(rawData$SC0, breaks=seq(0,42,by=2), xlab='Score', main='Score distribution of participants')
 
 # correlation between duration and score
 cor.test(rawData$Duration..in.seconds., rawData$SC0, method = c("pearson"))
@@ -35,14 +32,9 @@ cor.test(rawData$Duration..in.seconds., rawData$SC0, method = c("pearson"))
 # correlation between age and score
 cor.test(rawData$Age, rawData$SC0, method = c("pearson"))
 
-# TODO: do a t-test for gender effects if time and interest allow: 
-# http://www.sthda.com/english/wiki/unpaired-two-samples-t-test-in-r
-
 groups <- list('t','c')
 methods <-list('real', 'lstm','markov')
 #mapping <- setNames(methods,list(1,2,2))
-
-# todo remove outliers / prank answers
 
 for(i in groups){
   for(j in methods){
@@ -76,15 +68,12 @@ for(i in groups){
 response_columns_err = c('treal_err','creal_err', 'tlstm_err', 'clstm_err', 'tmarkov_err','cmarkov_err')
 response_columns_att = c('treal_att','creal_att', 'tlstm_att', 'clstm_att', 'tmarkov_att','cmarkov_att')
 
-# R's figure command is weird
-#x11()
 # detect outliers in response patterns
 #outliers <- aq.plot(rawData[response_columns_err])
 # print
 #outliers
 
 #means <- sapply(rawData,mean)
-
 
 # Stack the data
 rawData_s <- stack(rawData, select=response_columns_att)
@@ -122,12 +111,12 @@ rawData_s$method <- as.factor(sapply(rawData_s$ind,FUN = function(x) method_type
 # Plot accuracy by group ("method")
 # Color box plot by a second group: "grpoup"
 ggboxplot(rawData_s, x = "method", y = "attributionRate", color = "account",
-          palette = c("#00AFBB", "#E7B800"))
+          palette = c("#00AFBB", "#E7B800"), xlab="Method used")
 
 # line plot to visualize possible interaction effects
-ggline(rawData_s, x = "account", y = "attributionRate", color = "method",
+ggline(rawData_s, x = "method", y = "attributionRate", color = "account",
        add = c("mean_se", "dotplot"),
-       palette = c("#00AFBB", "#E7B800"))
+       palette = c("#00AFBB", "#E7B800"), xlab="Method used")
 
 
 allTrump <- subset(rawData_s, rawData_s$account == 'Trump')
